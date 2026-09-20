@@ -11,6 +11,7 @@
 - [Features Overview](#features-overview)
 - [Quick Setup](#quick-setup)
 - [Manual Installation Steps](#manual-installation-steps)
+- [Argent Flame Guild Ledger](#argent-flame-guild-ledger)
 - [Support Server](https://discord.gg/QnWNz2dKCE)
 - [Required Bot Intents](#bot-intents)
 - [Contributing](CONTRIBUTING.md)
@@ -126,6 +127,12 @@ TitanBot is fully containerized for easy deployment.
    ```
 
 This starts the bot and PostgreSQL. The compose file sets `POSTGRES_SSL=false` and `AUTO_MIGRATE=true` for the bundled database. Music uses public Lavalink v4 nodes from `lavalink/nodes.json` by default.
+
+## Argent Flame Guild Ledger
+
+Talos can record member coin, resource, and direct-tax contributions in the Argent Flame Google Sheet through `/ledger`. Officers can also link Discord accounts to the active roster without exposing Google credentials to members.
+
+See [Argent Flame Discord Ledger Setup](docs/argent-flame-ledger-setup.md) for the Apps Script deployment, environment variables, and first test.
 
 ### Music
 
