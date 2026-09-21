@@ -134,3 +134,10 @@ export async function getReactionRolePanelStatus(client, guild, panelData) {
     });
 }
 
+export async function getLedgerPanelStatus(client, guild, panelData) {
+    return getBotPanelStatus(client, guild, {
+        channelId: panelData?.channelId,
+        messageId: panelData?.messageId,
+        buttonCustomId: 'ledger_contribute_start',
+    });
+}

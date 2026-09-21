@@ -1,4 +1,5 @@
 import {
+  ChannelType,
   MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
@@ -15,6 +16,12 @@ import {
   recordLedgerContribution,
   unlinkLedgerMember,
 } from '../../services/argentFlameLedgerService.js';
+import {
+  buildContributionReceipt,
+  buildLedgerPanelPayload,
+  formatSeptims,
+} from '../../services/argentFlameLedgerUiService.js';
+import { getGuildConfig, patchGuildConfig } from '../../services/config/guildConfig.js';
 
 const MAX_AUTOCOMPLETE_CHOICES = 25;
 
@@ -34,10 +41,6 @@ function filterChoices(values, query, valueSelector = (value) => value) {
   return values
     .filter((entry) => String(valueSelector(entry) || '').toLowerCase().includes(normalizedQuery))
     .slice(0, MAX_AUTOCOMPLETE_CHOICES);
-}
-
-function formatSeptims(value) {
-  return `${Number(value || 0).toLocaleString('en-US')} septims`;
 }
 
 async function handleContribution(interaction) {
@@ -95,34 +98,105 @@ async function handleContribution(interaction) {
     note,
   });
 
-  const contributionDescription = kind === 'coin'
-    ? formatSeptims(result.gold)
-    : `${Number(result.units).toLocaleString('en-US')} × ${result.item}`;
-
-  const embed = createEmbed({
-    title: result.duplicate ? 'Contribution already recorded' : 'Contribution recorded',
-    description: result.duplicate
-      ? 'This Discord submission was already in the ledger, so no duplicate row was added.'
-      : 'Your weekly contribution has been added to the Argent Flame ledger.',
-    color: result.duplicate ? 'warning' : 'success',
-    fields: [
-      { name: 'Member', value: result.member, inline: true },
-      { name: 'Week', value: result.weekStart, inline: true },
-      { name: 'Contribution', value: contributionDescription, inline: false },
-      { name: 'Credited value', value: formatSeptims(result.totalValue), inline: true },
-      { name: 'Ledger row', value: String(result.contributionRow), inline: true },
-    ],
+  await InteractionHelper.safeEditReply(interaction, {
+    embeds: [buildContributionReceipt(result, kind)],
   });
+}
 
-  if (kind === 'tax') {
-    embed.addFields({
-      name: 'Tax effect',
-      value: `${formatSeptims(result.resourceCredit)} paid directly; this reduces the guild's cash tax due for the week.`,
-      inline: false,
-    });
+const LEDGER_PANEL_PERMISSIONS = [
+  PermissionFlagsBits.ViewChannel,
+  PermissionFlagsBits.SendMessages,
+  PermissionFlagsBits.EmbedLinks,
+  PermissionFlagsBits.ReadMessageHistory,
+];
+
+function assertPanelChannelPermissions(interaction, channel) {
+  const botMember = interaction.guild.members.me;
+  const permissions = channel.permissionsFor(botMember);
+  const missing = LEDGER_PANEL_PERMISSIONS.filter((permission) => !permissions?.has(permission));
+  if (missing.length) {
+    throw createError(
+      'Bot is missing ledger panel channel permissions',
+      ErrorTypes.PERMISSION,
+      `I need View Channel, Send Messages, Embed Links, and Read Message History in ${channel}.`,
+      { expected: true, channelId: channel.id },
+    );
+  }
+}
+
+async function fetchConfiguredPanel(interaction, panelConfig) {
+  if (!panelConfig?.channelId) return { channel: null, message: null };
+  const channel = await interaction.guild.channels.fetch(panelConfig.channelId).catch(() => null);
+  if (!channel?.isTextBased()) return { channel: null, message: null };
+  const message = panelConfig.messageId
+    ? await channel.messages.fetch(panelConfig.messageId).catch(() => null)
+    : null;
+  return { channel, message };
+}
+
+async function persistPanel(interaction, channel, message) {
+  await patchGuildConfig(interaction.client, interaction.guildId, {
+    argentFlameLedgerPanel: {
+      channelId: channel.id,
+      messageId: message.id,
+    },
+  });
+}
+
+async function handleSetupPanel(interaction) {
+  requireGuildManager(interaction);
+  const channel = interaction.options.getChannel('channel', true);
+  assertPanelChannelPermissions(interaction, channel);
+
+  const config = await getGuildConfig(interaction.client, interaction.guildId);
+  const existing = await fetchConfiguredPanel(interaction, config.argentFlameLedgerPanel);
+  let panelMessage = null;
+
+  if (existing.message && existing.channel?.id === channel.id) {
+    panelMessage = await existing.message.edit(buildLedgerPanelPayload());
+  } else {
+    if (existing.message) {
+      await existing.message.edit({ components: [] }).catch(() => {});
+    }
+    panelMessage = await channel.send(buildLedgerPanelPayload());
   }
 
-  await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
+  await persistPanel(interaction, channel, panelMessage);
+  await InteractionHelper.safeEditReply(interaction, {
+    embeds: [createEmbed({
+      title: 'Contribution panel ready',
+      description: `The permanent contribution button is active in ${channel}: [view panel](${panelMessage.url}).`,
+      color: 'success',
+    })],
+  });
+}
+
+async function handleRefreshPanel(interaction) {
+  requireGuildManager(interaction);
+  const config = await getGuildConfig(interaction.client, interaction.guildId);
+  const existing = await fetchConfiguredPanel(interaction, config.argentFlameLedgerPanel);
+  if (!existing.channel) {
+    throw createError(
+      'Ledger panel has no valid configured channel',
+      ErrorTypes.CONFIGURATION,
+      'No contribution panel channel is configured. Run `/ledger setup-panel` first.',
+      { expected: true },
+    );
+  }
+
+  assertPanelChannelPermissions(interaction, existing.channel);
+  const panelMessage = existing.message
+    ? await existing.message.edit(buildLedgerPanelPayload())
+    : await existing.channel.send(buildLedgerPanelPayload());
+  await persistPanel(interaction, existing.channel, panelMessage);
+
+  await InteractionHelper.safeEditReply(interaction, {
+    embeds: [createEmbed({
+      title: 'Contribution panel refreshed',
+      description: `The contribution panel is active in ${existing.channel}: [view panel](${panelMessage.url}).`,
+      color: 'success',
+    })],
+  });
 }
 
 async function handleLink(interaction) {
@@ -225,7 +299,18 @@ export default {
       .addUserOption((option) => option
         .setName('user')
         .setDescription('Discord user to unlink')
-        .setRequired(true))),
+        .setRequired(true)))
+    .addSubcommand((subcommand) => subcommand
+      .setName('setup-panel')
+      .setDescription('Officer: post or move the permanent contribution panel')
+      .addChannelOption((option) => option
+        .setName('channel')
+        .setDescription('Channel where members will record contributions')
+        .addChannelTypes(ChannelType.GuildText)
+        .setRequired(true)))
+    .addSubcommand((subcommand) => subcommand
+      .setName('refresh-panel')
+      .setDescription('Officer: repair or repost the configured contribution panel')),
 
   async execute(interaction) {
     assertLedgerGuild(interaction.guildId);
@@ -239,6 +324,10 @@ export default {
       await handleLink(interaction);
     } else if (subcommand === 'unlink-member') {
       await handleUnlink(interaction);
+    } else if (subcommand === 'setup-panel') {
+      await handleSetupPanel(interaction);
+    } else if (subcommand === 'refresh-panel') {
+      await handleRefreshPanel(interaction);
     }
   },
 

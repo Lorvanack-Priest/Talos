@@ -5,6 +5,7 @@ import {
     getTicketPanelStatus,
     getVerificationPanelStatus,
     getReactionRolePanelStatus,
+    getLedgerPanelStatus,
 } from '../utils/panelStatus.js';
 import { getAllReactionRoleMessages } from './reactionRoleService.js';
 
@@ -160,6 +161,52 @@ export async function reconcileReactionRolePanelHealth(client) {
         } catch (error) {
             summary.errors += 1;
             logger.warn(`Reaction role panel health check failed for guild ${guild.id}:`, error.message);
+        }
+    }
+
+    return summary;
+}
+
+export async function reconcileLedgerPanels(client) {
+    const summary = {
+        scannedGuilds: 0,
+        healthyPanels: 0,
+        deletedPanels: 0,
+        missingChannels: 0,
+        recoveredIds: 0,
+        errors: 0,
+    };
+
+    for (const guild of client.guilds.cache.values()) {
+        summary.scannedGuilds += 1;
+
+        try {
+            const config = await getGuildConfig(client, guild.id);
+            const panel = config?.argentFlameLedgerPanel;
+            if (!panel?.channelId) continue;
+
+            const panelStatus = await getLedgerPanelStatus(client, guild, panel);
+            if (panelStatus.recoveredId) {
+                summary.recoveredIds += 1;
+                await patchGuildConfig(client, guild.id, {
+                    argentFlameLedgerPanel: { ...panel, messageId: panelStatus.recoveredId },
+                });
+            }
+
+            if (panelStatus.exists) {
+                summary.healthyPanels += 1;
+            } else if (panelStatus.reason === 'channel_missing') {
+                summary.missingChannels += 1;
+                logger.warn(`Ledger panel channel missing for guild ${guild.id} (${guild.name})`);
+            } else if (panelStatus.reason === 'panel_deleted') {
+                summary.deletedPanels += 1;
+                logger.warn(
+                    `Ledger panel deleted for guild ${guild.id} (${guild.name}) — repair it with /ledger refresh-panel`,
+                );
+            }
+        } catch (error) {
+            summary.errors += 1;
+            logger.warn(`Ledger panel health check failed for guild ${guild.id}:`, error.message);
         }
     }
 

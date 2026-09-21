@@ -17,6 +17,8 @@ const LEDGER = Object.freeze({
   submissionFirstRow: 5,
 });
 
+var LEDGER_SPREADSHEET = null;
+
 function doGet() {
   return json_({ ok: true, service: 'Argent Flame Ledger', version: 1 });
 }
@@ -91,7 +93,10 @@ function authorize_(providedSecret) {
 }
 
 function spreadsheet_() {
-  return SpreadsheetApp.openById(LEDGER.spreadsheetId);
+  if (!LEDGER_SPREADSHEET) {
+    LEDGER_SPREADSHEET = SpreadsheetApp.openById(LEDGER.spreadsheetId);
+  }
+  return LEDGER_SPREADSHEET;
 }
 
 function sheet_(name) {
@@ -193,6 +198,7 @@ function recordContribution_(request) {
 
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
+  var submissionRow = null;
   try {
     const duplicate = findSubmission_(submissionId);
     if (duplicate) return duplicateReceipt_(duplicate);
@@ -213,6 +219,22 @@ function recordContribution_(request) {
     if (!contributionRow) {
       throw new Error('The Contributions sheet has no open rows. Ask an officer to expand the ledger.');
     }
+
+    submissionRow = appendSubmission_({
+      submissionId: submissionId,
+      submittedAt: submittedAt,
+      weekStart: weekStart,
+      discordUserId: discordUserId,
+      discordUsername: request.discordUsername,
+      member: link.member,
+      kind: kind,
+      gold: amount,
+      item: item,
+      units: units,
+      contributionRow: '',
+      status: 'Processing',
+      note: request.note,
+    });
 
     prepareContributionRow_(contributionSheet, contributionRow);
     const note = buildContributionNote_(request.discordUsername, request.note);
@@ -243,22 +265,12 @@ function recordContribution_(request) {
       contributionRow: contributionRow,
     };
 
-    appendSubmission_({
-      submissionId: submissionId,
-      submittedAt: submittedAt,
-      weekStart: weekStart,
-      discordUserId: discordUserId,
-      discordUsername: request.discordUsername,
-      member: link.member,
-      kind: kind,
-      gold: amount,
-      item: item,
-      units: units,
-      contributionRow: contributionRow,
-      note: request.note,
-    });
+    completeSubmission_(submissionRow, contributionRow);
     updateLinkedUsername_(link.row, request.discordUsername);
     return receipt;
+  } catch (error) {
+    if (submissionRow) failSubmission_(submissionRow);
+    throw error;
   } finally {
     lock.releaseLock();
   }
@@ -295,7 +307,11 @@ function findDiscordMemberRow_(sheet, discordUserId) {
 }
 
 function updateLinkedUsername_(row, username) {
-  sheet_(LEDGER.discordMembersSheet).getRange(row, 2).setValue(safeCellText_(username, 100));
+  try {
+    sheet_(LEDGER.discordMembersSheet).getRange(row, 2).setValue(safeCellText_(username, 100));
+  } catch (error) {
+    console.error('Could not refresh linked Discord username: ' + safeError_(error));
+  }
 }
 
 function validateItem_(item, kind, weekStart) {
@@ -372,10 +388,26 @@ function appendSubmission_(entry) {
     entry.item,
     entry.units || '',
     entry.contributionRow,
-    'Recorded',
+    entry.status || 'Recorded',
     safeCellText_(entry.note, 500),
   ]]);
   sheet.getRange(row, 2, 1, 2).setNumberFormats([['m/d/yyyy h:mm am/pm', 'm/d/yyyy']]);
+  return row;
+}
+
+function completeSubmission_(row, contributionRow) {
+  sheet_(LEDGER.submissionsSheet).getRange(row, 11, 1, 2).setValues([[
+    contributionRow,
+    'Recorded',
+  ]]);
+}
+
+function failSubmission_(row) {
+  try {
+    sheet_(LEDGER.submissionsSheet).getRange(row, 12).setValue('Failed');
+  } catch (error) {
+    console.error('Could not mark failed ledger submission: ' + safeError_(error));
+  }
 }
 
 function findSubmission_(submissionId) {
@@ -393,6 +425,13 @@ function findSubmission_(submissionId) {
 
 function duplicateReceipt_(submission) {
   const row = submission.values;
+  const status = String(row[11] || '').trim().toLowerCase();
+  if (status === 'processing') {
+    throw new Error('This contribution is still being processed. Wait a moment before checking the ledger.');
+  }
+  if (status !== 'recorded') {
+    throw new Error('The previous contribution attempt did not complete. Start a new submission.');
+  }
   const contributionRow = number_(row[10]);
   const contribution = contributionRow
     ? sheet_(LEDGER.contributionsSheet).getRange(contributionRow, 1, 1, 10).getValues()[0]

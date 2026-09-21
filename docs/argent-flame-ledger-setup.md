@@ -1,10 +1,12 @@
 # Argent Flame Discord Ledger Setup
 
-Talos includes one global `/ledger` command with three subcommands:
+Talos includes one global `/ledger` command with five subcommands:
 
 - `/ledger contribute` records coin, resources, or a direct tax payment.
 - `/ledger link-member` links a Discord account to an active name on the `Members` tab. It requires **Manage Server**.
 - `/ledger unlink-member` deactivates that link without changing history. It requires **Manage Server**.
+- `/ledger setup-panel` posts or moves the permanent contribution panel. It requires **Manage Server**.
+- `/ledger refresh-panel` repairs or reposts the configured panel. It requires **Manage Server**.
 
 The bot never receives Google account credentials. It sends signed JSON requests to a Google Apps Script web app, and that script writes to the existing `Contributions`, `Discord Members`, and `Discord Submissions` tabs.
 
@@ -41,10 +43,20 @@ ARGENT_LEDGER_GUILD_ID=REPLACE_WITH_DISCORD_SERVER_ID
 
 Redeploy or restart Talos after saving the variables. The command is registered globally, so Discord may take up to an hour to show it after the first deployment.
 
-## 4. Link members and test
+## 4. Create the permanent contribution panel
+
+1. Run `/ledger setup-panel` and select the channel where members should submit donations.
+2. Talos posts an **Argent Flame Guild Contributions** panel with a permanent **Record Contribution** button.
+3. Members select the button, choose Coin, Resource, or Direct Tax, and complete the private form.
+
+The panel uses global interaction handlers rather than a temporary collector, so it continues working after Talos restarts. If the message is deleted or its components need to be repaired, run `/ledger refresh-panel`. Running `/ledger setup-panel` again moves the panel to a different channel and disables the old button.
+
+Talos needs **View Channel**, **Send Messages**, **Embed Links**, and **Read Message History** in the selected channel.
+
+## 5. Link members and test
 
 1. An officer runs `/ledger link-member`, selects the Discord user, and chooses the matching active roster name.
-2. That member runs `/ledger contribute`.
+2. That member uses the panel button or runs `/ledger contribute`.
 3. Confirm the entry appears on `Contributions` and the audit record appears on `Discord Submissions`.
 
 Examples:
@@ -60,4 +72,5 @@ Resource and tax prices come from the dated Price History on `Setup`, so changin
 - Never commit the Discord token or ledger shared secret.
 - If the secret is exposed, run `generateLedgerSecret` again, update the bot environment variable, and redeploy.
 - Each Discord interaction ID is recorded in `Discord Submissions`; retries cannot create a duplicate contribution.
+- Submission audit rows are reserved before the contribution is written and finalized as `Recorded`, which prevents a slow Sheet response from losing the audit trail.
 - Removing a link marks it inactive. It does not delete old contributions or dividends.

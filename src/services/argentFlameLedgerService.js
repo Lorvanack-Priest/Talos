@@ -1,6 +1,6 @@
 import { createError, ErrorTypes } from '../utils/errorHandler.js';
 
-const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
 const AUTOCOMPLETE_TIMEOUT_MS = 2_400;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -114,7 +114,7 @@ export async function requestLedger(action, payload = {}, options = {}) {
       throw createError(
         'Ledger request timed out',
         ErrorTypes.NETWORK,
-        'The guild ledger took too long to respond. Try again in a moment.',
+        'The guild ledger is still processing this request. Check the ledger before submitting the same contribution again.',
         { service: 'argent_flame_ledger', action },
       );
     }
@@ -132,13 +132,17 @@ export async function requestLedger(action, payload = {}, options = {}) {
   }
 }
 
-export async function getLedgerItems(kind) {
+export async function getLedgerItems(kind, options = {}) {
   const normalizedKind = kind === 'tax' ? 'tax' : 'resource';
   const cacheKey = `items:${normalizedKind}`;
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
-  const result = await requestLedger('items', { kind: normalizedKind }, { timeoutMs: AUTOCOMPLETE_TIMEOUT_MS });
+  const result = await requestLedger(
+    'items',
+    { kind: normalizedKind },
+    { timeoutMs: options.timeoutMs || AUTOCOMPLETE_TIMEOUT_MS },
+  );
   return setCached(cacheKey, Array.isArray(result.items) ? result.items : []);
 }
 

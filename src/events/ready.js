@@ -2,7 +2,12 @@ import { Events } from "discord.js";
 import { logger, startupLog } from "../utils/logger.js";
 import config from "../config/application.js";
 import { reconcileReactionRoleMessages } from "../services/reactionRoleService.js";
-import { reconcileTicketPanels, reconcileVerificationPanels, reconcileReactionRolePanelHealth } from "../services/panelHealthService.js";
+import {
+  reconcileLedgerPanels,
+  reconcileTicketPanels,
+  reconcileVerificationPanels,
+  reconcileReactionRolePanelHealth,
+} from "../services/panelHealthService.js";
 import { reconcileLevelRoles } from "../services/leveling/levelRoleSyncService.js";
 import { initRiffyAfterReady } from "../services/music/riffySetup.js";
 
@@ -40,6 +45,11 @@ export default {
       const reactionRolePanelSummary = await reconcileReactionRolePanelHealth(client);
       startupLog(
         `Reaction role panel health: scanned ${reactionRolePanelSummary.scannedPanels} panels, healthy ${reactionRolePanelSummary.healthyPanels}, deleted ${reactionRolePanelSummary.deletedPanels}, missing channel ${reactionRolePanelSummary.missingChannels}, recovered ${reactionRolePanelSummary.recoveredIds}, errors ${reactionRolePanelSummary.errors}`
+      );
+
+      const ledgerPanelSummary = await reconcileLedgerPanels(client);
+      startupLog(
+        `Ledger panel health: scanned ${ledgerPanelSummary.scannedGuilds} guilds, healthy ${ledgerPanelSummary.healthyPanels}, deleted ${ledgerPanelSummary.deletedPanels}, missing channel ${ledgerPanelSummary.missingChannels}, recovered ${ledgerPanelSummary.recoveredIds}, errors ${ledgerPanelSummary.errors}`
       );
 
       const levelRoleSummary = await reconcileLevelRoles(client);
