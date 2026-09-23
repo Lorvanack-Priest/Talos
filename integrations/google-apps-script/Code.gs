@@ -458,7 +458,9 @@ function mondayFor_(date) {
   const noonUtc = new Date(localDate + 'T12:00:00Z');
   const daysSinceMonday = (noonUtc.getUTCDay() + 6) % 7;
   noonUtc.setUTCDate(noonUtc.getUTCDate() - daysSinceMonday);
-  return noonUtc;
+
+  const mondayDate = Utilities.formatDate(noonUtc, 'UTC', 'yyyy-MM-dd');
+  return Utilities.parseDate(mondayDate, timeZone, 'yyyy-MM-dd');
 }
 
 function formatDate_(date, pattern) {
