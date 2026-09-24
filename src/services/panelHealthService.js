@@ -6,6 +6,7 @@ import {
     getVerificationPanelStatus,
     getReactionRolePanelStatus,
     getLedgerPanelStatus,
+    getLedgerStockPanelStatus,
 } from '../utils/panelStatus.js';
 import { getAllReactionRoleMessages } from './reactionRoleService.js';
 
@@ -182,27 +183,45 @@ export async function reconcileLedgerPanels(client) {
 
         try {
             const config = await getGuildConfig(client, guild.id);
-            const panel = config?.argentFlameLedgerPanel;
-            if (!panel?.channelId) continue;
+            const panels = [
+                {
+                    configKey: 'argentFlameLedgerPanel',
+                    panel: config?.argentFlameLedgerPanel,
+                    getStatus: getLedgerPanelStatus,
+                    label: 'Contribution panel',
+                    repairCommand: '/ledger refresh-panel',
+                },
+                {
+                    configKey: 'argentFlameStockPanel',
+                    panel: config?.argentFlameStockPanel,
+                    getStatus: getLedgerStockPanelStatus,
+                    label: 'Material stock panel',
+                    repairCommand: '/ledger refresh-stock-panel',
+                },
+            ];
 
-            const panelStatus = await getLedgerPanelStatus(client, guild, panel);
-            if (panelStatus.recoveredId) {
-                summary.recoveredIds += 1;
-                await patchGuildConfig(client, guild.id, {
-                    argentFlameLedgerPanel: { ...panel, messageId: panelStatus.recoveredId },
-                });
-            }
+            for (const entry of panels) {
+                if (!entry.panel?.channelId) continue;
 
-            if (panelStatus.exists) {
-                summary.healthyPanels += 1;
-            } else if (panelStatus.reason === 'channel_missing') {
-                summary.missingChannels += 1;
-                logger.warn(`Ledger panel channel missing for guild ${guild.id} (${guild.name})`);
-            } else if (panelStatus.reason === 'panel_deleted') {
-                summary.deletedPanels += 1;
-                logger.warn(
-                    `Ledger panel deleted for guild ${guild.id} (${guild.name}) — repair it with /ledger refresh-panel`,
-                );
+                const panelStatus = await entry.getStatus(client, guild, entry.panel);
+                if (panelStatus.recoveredId) {
+                    summary.recoveredIds += 1;
+                    await patchGuildConfig(client, guild.id, {
+                        [entry.configKey]: { ...entry.panel, messageId: panelStatus.recoveredId },
+                    });
+                }
+
+                if (panelStatus.exists) {
+                    summary.healthyPanels += 1;
+                } else if (panelStatus.reason === 'channel_missing') {
+                    summary.missingChannels += 1;
+                    logger.warn(`${entry.label} channel missing for guild ${guild.id} (${guild.name})`);
+                } else if (panelStatus.reason === 'panel_deleted') {
+                    summary.deletedPanels += 1;
+                    logger.warn(
+                        `${entry.label} deleted for guild ${guild.id} (${guild.name}) — repair it with ${entry.repairCommand}`,
+                    );
+                }
             }
         } catch (error) {
             summary.errors += 1;

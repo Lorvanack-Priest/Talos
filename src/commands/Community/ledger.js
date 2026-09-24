@@ -9,6 +9,7 @@ import { createError, ErrorTypes } from '../../utils/errorHandler.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 import {
   assertLedgerGuild,
+  getLedgerInventory,
   getLedgerItems,
   getLedgerMembers,
   isLedgerGuild,
@@ -19,6 +20,7 @@ import {
 import {
   buildContributionReceipt,
   buildLedgerPanelPayload,
+  buildMaterialStockPanelPayload,
   formatSeptims,
 } from '../../services/argentFlameLedgerUiService.js';
 import { getGuildConfig, patchGuildConfig } from '../../services/config/guildConfig.js';
@@ -28,9 +30,9 @@ const MAX_AUTOCOMPLETE_CHOICES = 25;
 function requireGuildManager(interaction) {
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
     throw createError(
-      'Member-link command requires Manage Server',
+      'Ledger management command requires Manage Server',
       ErrorTypes.PERMISSION,
-      'You need the Manage Server permission to link or unlink ledger members.',
+      'You need the Manage Server permission to manage ledger members and permanent panels.',
       { expected: true },
     );
   }
@@ -134,9 +136,9 @@ async function fetchConfiguredPanel(interaction, panelConfig) {
   return { channel, message };
 }
 
-async function persistPanel(interaction, channel, message) {
+async function persistPanel(interaction, configKey, channel, message) {
   await patchGuildConfig(interaction.client, interaction.guildId, {
-    argentFlameLedgerPanel: {
+    [configKey]: {
       channelId: channel.id,
       messageId: message.id,
     },
@@ -161,7 +163,7 @@ async function handleSetupPanel(interaction) {
     panelMessage = await channel.send(buildLedgerPanelPayload());
   }
 
-  await persistPanel(interaction, channel, panelMessage);
+  await persistPanel(interaction, 'argentFlameLedgerPanel', channel, panelMessage);
   await InteractionHelper.safeEditReply(interaction, {
     embeds: [createEmbed({
       title: 'Contribution panel ready',
@@ -188,12 +190,74 @@ async function handleRefreshPanel(interaction) {
   const panelMessage = existing.message
     ? await existing.message.edit(buildLedgerPanelPayload())
     : await existing.channel.send(buildLedgerPanelPayload());
-  await persistPanel(interaction, existing.channel, panelMessage);
+  await persistPanel(interaction, 'argentFlameLedgerPanel', existing.channel, panelMessage);
 
   await InteractionHelper.safeEditReply(interaction, {
     embeds: [createEmbed({
       title: 'Contribution panel refreshed',
       description: `The contribution panel is active in ${existing.channel}: [view panel](${panelMessage.url}).`,
+      color: 'success',
+    })],
+  });
+}
+
+async function handleSetupStockPanel(interaction) {
+  requireGuildManager(interaction);
+  const channel = interaction.options.getChannel('channel', true);
+  assertPanelChannelPermissions(interaction, channel);
+
+  const [config, inventory] = await Promise.all([
+    getGuildConfig(interaction.client, interaction.guildId),
+    getLedgerInventory(),
+  ]);
+  const existing = await fetchConfiguredPanel(interaction, config.argentFlameStockPanel);
+  const payload = buildMaterialStockPanelPayload(inventory);
+  let panelMessage = null;
+
+  if (existing.message && existing.channel?.id === channel.id) {
+    panelMessage = await existing.message.edit(payload);
+  } else {
+    if (existing.message) {
+      await existing.message.edit({ components: [] }).catch(() => {});
+    }
+    panelMessage = await channel.send(payload);
+  }
+
+  await persistPanel(interaction, 'argentFlameStockPanel', channel, panelMessage);
+  await InteractionHelper.safeEditReply(interaction, {
+    embeds: [createEmbed({
+      title: 'Material stock panel ready',
+      description: `The permanent guild material stock panel is active in ${channel}: [view panel](${panelMessage.url}).`,
+      color: 'success',
+    })],
+  });
+}
+
+async function handleRefreshStockPanel(interaction) {
+  requireGuildManager(interaction);
+  const config = await getGuildConfig(interaction.client, interaction.guildId);
+  const existing = await fetchConfiguredPanel(interaction, config.argentFlameStockPanel);
+  if (!existing.channel) {
+    throw createError(
+      'Material stock panel has no valid configured channel',
+      ErrorTypes.CONFIGURATION,
+      'No material stock panel channel is configured. Run `/ledger setup-stock-panel` first.',
+      { expected: true },
+    );
+  }
+
+  assertPanelChannelPermissions(interaction, existing.channel);
+  const inventory = await getLedgerInventory();
+  const payload = buildMaterialStockPanelPayload(inventory);
+  const panelMessage = existing.message
+    ? await existing.message.edit(payload)
+    : await existing.channel.send(payload);
+  await persistPanel(interaction, 'argentFlameStockPanel', existing.channel, panelMessage);
+
+  await InteractionHelper.safeEditReply(interaction, {
+    embeds: [createEmbed({
+      title: 'Material stock panel refreshed',
+      description: `The material stock panel is active in ${existing.channel}: [view panel](${panelMessage.url}).`,
       color: 'success',
     })],
   });
@@ -310,7 +374,18 @@ export default {
         .setRequired(true)))
     .addSubcommand((subcommand) => subcommand
       .setName('refresh-panel')
-      .setDescription('Officer: repair or repost the configured contribution panel')),
+      .setDescription('Officer: repair or repost the configured contribution panel'))
+    .addSubcommand((subcommand) => subcommand
+      .setName('setup-stock-panel')
+      .setDescription('Officer: post or move the permanent material stock panel')
+      .addChannelOption((option) => option
+        .setName('channel')
+        .setDescription('Channel where the guild material stock will be displayed')
+        .addChannelTypes(ChannelType.GuildText)
+        .setRequired(true)))
+    .addSubcommand((subcommand) => subcommand
+      .setName('refresh-stock-panel')
+      .setDescription('Officer: repair or repost the configured material stock panel')),
 
   async execute(interaction) {
     assertLedgerGuild(interaction.guildId);
@@ -328,6 +403,10 @@ export default {
       await handleSetupPanel(interaction);
     } else if (subcommand === 'refresh-panel') {
       await handleRefreshPanel(interaction);
+    } else if (subcommand === 'setup-stock-panel') {
+      await handleSetupStockPanel(interaction);
+    } else if (subcommand === 'refresh-stock-panel') {
+      await handleRefreshStockPanel(interaction);
     }
   },
 

@@ -130,7 +130,7 @@ This starts the bot and PostgreSQL. The compose file sets `POSTGRES_SSL=false` a
 
 ## Argent Flame Guild Ledger
 
-Talos can record member coin, resource, and direct-tax contributions in the Argent Flame Google Sheet through `/ledger`. Officers can also link Discord accounts to the active roster without exposing Google credentials to members.
+Talos can record member coin, resource, and direct-tax contributions in the Argent Flame Google Sheet through `/ledger`. Officers can also link Discord accounts to the active roster and post a permanent, refreshable guild material-stock panel without exposing Google credentials to members.
 
 See [Argent Flame Discord Ledger Setup](docs/argent-flame-ledger-setup.md) for the Apps Script deployment, environment variables, and first test.
 

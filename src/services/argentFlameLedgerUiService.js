@@ -16,6 +16,7 @@ export const LEDGER_TAX_BUTTON_ID = 'ledger_contribute_tax';
 export const LEDGER_COIN_MODAL_ID = 'ledger_contribution_coin_modal';
 export const LEDGER_RESOURCE_MODAL_ID = 'ledger_contribution_resource_modal';
 export const LEDGER_TAX_MODAL_ID = 'ledger_contribution_tax_modal';
+export const LEDGER_STOCK_REFRESH_BUTTON_ID = 'ledger_stock_refresh';
 
 export function formatSeptims(value) {
   return `${Number(value || 0).toLocaleString('en-US')} septims`;
@@ -42,6 +43,108 @@ export function buildLedgerPanelPayload() {
       new ButtonBuilder()
         .setCustomId(LEDGER_PANEL_BUTTON_ID)
         .setLabel('Record Contribution')
+        .setStyle(ButtonStyle.Primary),
+    )],
+  };
+}
+
+function formatStockNumber(value) {
+  return Number(value || 0).toLocaleString('en-US', {
+    maximumFractionDigits: 2,
+  });
+}
+
+function buildStockFields(items) {
+  const grouped = new Map();
+  items.forEach((item) => {
+    const category = String(item.category || 'Other').trim() || 'Other';
+    const entries = grouped.get(category) || [];
+    entries.push(item);
+    grouped.set(category, entries);
+  });
+
+  const candidates = [];
+
+  for (const category of [...grouped.keys()].sort((a, b) => a.localeCompare(b))) {
+    const entries = grouped.get(category)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    let chunkLines = [];
+    let chunkLength = 0;
+    let part = 1;
+
+    for (const item of entries) {
+      const line = `**${item.name}** — ${formatStockNumber(item.currentStock)}\n`;
+      if (chunkLines.length && chunkLength + line.length > 1_024) {
+        candidates.push({
+          name: part === 1 ? category : `${category} (continued)`,
+          value: chunkLines.join('').trimEnd(),
+          itemCount: chunkLines.length,
+        });
+        chunkLines = [];
+        chunkLength = 0;
+        part += 1;
+      }
+      chunkLines.push(line);
+      chunkLength += line.length;
+    }
+
+    if (chunkLines.length) {
+      candidates.push({
+        name: part === 1 ? category : `${category} (continued)`,
+        value: chunkLines.join('').trimEnd(),
+        itemCount: chunkLines.length,
+      });
+    }
+  }
+
+  const fields = [];
+  let remainingCharacters = 4_800;
+  let omittedItems = 0;
+  candidates.forEach((candidate) => {
+    const candidateCharacters = candidate.name.length + candidate.value.length;
+    if (fields.length >= 24 || candidateCharacters > remainingCharacters) {
+      omittedItems += candidate.itemCount;
+      return;
+    }
+    fields.push({ name: candidate.name, value: candidate.value });
+    remainingCharacters -= candidateCharacters;
+  });
+
+  if (omittedItems > 0) {
+    fields.push({
+      name: 'Additional stock',
+      value: `${omittedItems.toLocaleString('en-US')} more stocked items are available in the Google Sheet.`,
+    });
+  }
+
+  return fields;
+}
+
+export function buildMaterialStockPanelPayload(inventory) {
+  const stockedItems = (Array.isArray(inventory?.items) ? inventory.items : [])
+    .filter((item) => Number(item.currentStock) !== 0);
+  const refreshedAt = Date.parse(inventory?.refreshedAt || '') || Date.now();
+  const refreshTimestamp = Math.floor(refreshedAt / 1_000);
+  const fields = stockedItems.length
+    ? buildStockFields(stockedItems)
+    : [{ name: 'Current stock', value: 'No materials are currently recorded in guild storage.' }];
+
+  return {
+    embeds: [createEmbed({
+      title: 'Argent Flame Guild Material Stock',
+      description: [
+        `**${formatStockNumber(inventory?.stockedItems)}** stocked items • **${formatStockNumber(inventory?.totalUnits)}** total units`,
+        `Priced stock value: **${formatSeptims(inventory?.totalValue)}**`,
+        inventory?.countedThrough ? `Physical count baseline: **${inventory.countedThrough}**` : '',
+        `Last refreshed <t:${refreshTimestamp}:R>.`,
+      ].filter(Boolean).join('\n'),
+      color: 'primary',
+      fields,
+    })],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(LEDGER_STOCK_REFRESH_BUTTON_ID)
+        .setLabel('Refresh Stock')
         .setStyle(ButtonStyle.Primary),
     )],
   };

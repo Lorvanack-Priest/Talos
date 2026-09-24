@@ -5,6 +5,7 @@ const LEDGER = Object.freeze({
   discordMembersSheet: 'Discord Members',
   submissionsSheet: 'Discord Submissions',
   setupSheet: 'Setup',
+  inventorySheet: 'Material Inventory',
   contributionFirstRow: 7,
   contributionLastRow: 506,
   memberFirstRow: 7,
@@ -15,12 +16,15 @@ const LEDGER = Object.freeze({
   priceLastRow: 216,
   discordMemberFirstRow: 5,
   submissionFirstRow: 5,
+  inventoryFirstRow: 7,
+  inventoryLastRow: 106,
+  inventoryCountedThroughCell: 'G3',
 });
 
 var LEDGER_SPREADSHEET = null;
 
 function doGet() {
-  return json_({ ok: true, service: 'Argent Flame Ledger', version: 1 });
+  return json_({ ok: true, service: 'Argent Flame Ledger', version: 2 });
 }
 
 function doPost(event) {
@@ -30,9 +34,11 @@ function doPost(event) {
 
     switch (request.action) {
       case 'health':
-        return json_({ ok: true, spreadsheet: spreadsheet_().getName(), version: 1 });
+        return json_({ ok: true, spreadsheet: spreadsheet_().getName(), version: 2 });
       case 'items':
         return json_({ ok: true, items: listItems_(request.kind) });
+      case 'inventory':
+        return json_(listInventory_());
       case 'members':
         return json_({ ok: true, members: listActiveMembers_() });
       case 'link':
@@ -61,11 +67,14 @@ function testLedgerConnection() {
   const members = listActiveMembers_();
   const resources = listItems_('resource');
   const taxes = listItems_('tax');
+  const inventory = listInventory_();
   const result = {
     spreadsheet: spreadsheet_().getName(),
     activeMembers: members.length,
     resourceItems: resources.length,
     taxItems: taxes.length,
+    stockedItems: inventory.stockedItems,
+    totalInventoryUnits: inventory.totalUnits,
   };
   console.log(JSON.stringify(result));
   return result;
@@ -137,6 +146,44 @@ function listItems_(kind) {
         bundleQuantity: number_(row[4]),
       };
     });
+}
+
+function listInventory_() {
+  SpreadsheetApp.flush();
+  const inventorySheet = sheet_(LEDGER.inventorySheet);
+  const rowCount = LEDGER.inventoryLastRow - LEDGER.inventoryFirstRow + 1;
+  const rows = inventorySheet
+    .getRange(LEDGER.inventoryFirstRow, 1, rowCount, 7)
+    .getValues();
+
+  const items = rows
+    .filter(function (row) { return String(row[0] || '').trim() !== ''; })
+    .map(function (row) {
+      return {
+        name: String(row[0]).trim(),
+        category: String(row[1] || 'Other').trim() || 'Other',
+        countedStock: number_(row[2]),
+        addedSinceCount: number_(row[3]),
+        usedSinceCount: number_(row[4]),
+        currentStock: number_(row[5]),
+        stockValue: number_(row[6]),
+      };
+    });
+
+  const countedThrough = inventorySheet
+    .getRange(LEDGER.inventoryCountedThroughCell)
+    .getValue();
+
+  return {
+    ok: true,
+    countedThrough: formatDate_(countedThrough, 'M/d/yyyy'),
+    refreshedAt: new Date().toISOString(),
+    trackedItems: items.length,
+    stockedItems: items.filter(function (item) { return item.currentStock !== 0; }).length,
+    totalUnits: items.reduce(function (total, item) { return total + item.currentStock; }, 0),
+    totalValue: items.reduce(function (total, item) { return total + item.stockValue; }, 0),
+    items: items,
+  };
 }
 
 function linkMember_(request) {

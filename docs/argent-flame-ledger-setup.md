@@ -1,14 +1,17 @@
 # Argent Flame Discord Ledger Setup
 
-Talos includes one global `/ledger` command with five subcommands:
+Talos includes one global `/ledger` command with seven subcommands:
 
 - `/ledger contribute` records coin, resources, or a direct tax payment.
 - `/ledger link-member` links a Discord account to an active name on the `Members` tab. It requires **Manage Server**.
 - `/ledger unlink-member` deactivates that link without changing history. It requires **Manage Server**.
 - `/ledger setup-panel` posts or moves the permanent contribution panel. It requires **Manage Server**.
 - `/ledger refresh-panel` repairs or reposts the configured panel. It requires **Manage Server**.
+- `/ledger setup-stock-panel` posts or moves the permanent guild material stock panel. It requires **Manage Server**.
+- `/ledger refresh-stock-panel` repairs or reposts the configured material stock panel. It requires **Manage Server**.
 
 The bot never receives Google account credentials. It sends signed JSON requests to a Google Apps Script web app, and that script writes to the existing `Contributions`, `Discord Members`, and `Discord Submissions` tabs.
+The same bridge reads `Material Inventory` so Discord can display the live `Current stock` values.
 
 ## 1. Install the Google Apps Script
 
@@ -18,6 +21,8 @@ The bot never receives Google account credentials. It sends signed JSON requests
 4. Select `generateLedgerSecret` at the top of the Apps Script editor and click **Run**.
 5. Approve the Google authorization prompt. Copy the `ARGENT_LEDGER_SHARED_SECRET=...` value from the execution log.
 6. Select `testLedgerConnection` and click **Run**. The log should report the spreadsheet name plus counts for members, resources, and tax items.
+
+When updating an existing installation, replace the Apps Script editor contents with the latest `Code.gs`, then use **Deploy → Manage deployments → Edit → New version → Deploy**. The existing web-app URL and shared secret remain unchanged.
 
 ## 2. Deploy the web app
 
@@ -53,7 +58,15 @@ The panel uses global interaction handlers rather than a temporary collector, so
 
 Talos needs **View Channel**, **Send Messages**, **Embed Links**, and **Read Message History** in the selected channel.
 
-## 5. Link members and test
+## 5. Create the permanent material stock panel
+
+1. Run `/ledger setup-stock-panel` and select the channel where the guild inventory should remain visible.
+2. Talos reads the `Material Inventory` tab and posts every non-zero `Current stock` entry grouped by category.
+3. Anyone can press **Refresh Stock** to update that same message from the live Sheet. The response confirming the refresh is private.
+
+The stock panel also uses a global interaction handler, so its button continues working after Talos restarts. If the message is deleted, run `/ledger refresh-stock-panel`. Running `/ledger setup-stock-panel` again moves it and disables the old button.
+
+## 6. Link members and test
 
 1. An officer runs `/ledger link-member`, selects the Discord user, and chooses the matching active roster name.
 2. That member uses the panel button or runs `/ledger contribute`.

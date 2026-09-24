@@ -141,3 +141,11 @@ export async function getLedgerPanelStatus(client, guild, panelData) {
         buttonCustomId: 'ledger_contribute_start',
     });
 }
+
+export async function getLedgerStockPanelStatus(client, guild, panelData) {
+    return getBotPanelStatus(client, guild, {
+        channelId: panelData?.channelId,
+        messageId: panelData?.messageId,
+        buttonCustomId: 'ledger_stock_refresh',
+    });
+}

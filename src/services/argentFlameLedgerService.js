@@ -3,6 +3,7 @@ import { createError, ErrorTypes } from '../utils/errorHandler.js';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const AUTOCOMPLETE_TIMEOUT_MS = 2_400;
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const INVENTORY_CACHE_TTL_MS = 15 * 1000;
 
 const cache = new Map();
 
@@ -48,8 +49,8 @@ function getCached(key) {
   return entry.value;
 }
 
-function setCached(key, value) {
-  cache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
+function setCached(key, value, ttlMs = CACHE_TTL_MS) {
+  cache.set(key, { value, expiresAt: Date.now() + ttlMs });
   return value;
 }
 
@@ -154,6 +155,14 @@ export async function getLedgerMembers() {
   return setCached('members', Array.isArray(result.members) ? result.members : []);
 }
 
+export async function getLedgerInventory() {
+  const cached = getCached('inventory');
+  if (cached) return cached;
+
+  const result = await requestLedger('inventory');
+  return setCached('inventory', result, INVENTORY_CACHE_TTL_MS);
+}
+
 export async function linkLedgerMember(payload) {
   const result = await requestLedger('link', payload);
   invalidateMemberCache();
@@ -166,6 +175,8 @@ export async function unlinkLedgerMember(payload) {
   return result;
 }
 
-export function recordLedgerContribution(payload) {
-  return requestLedger('contribute', payload);
+export async function recordLedgerContribution(payload) {
+  const result = await requestLedger('contribute', payload);
+  if (payload?.kind === 'resource') cache.delete('inventory');
+  return result;
 }
